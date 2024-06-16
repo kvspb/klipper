@@ -3,7 +3,7 @@
 # Copyright (C) 2025  Gareth Farrington <gareth@waves.ky>
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
-import logging, math
+import logging, math, time
 import mcu
 from . import probe, sos_filter, load_cell, hx71x, ads1220
 
@@ -14,6 +14,18 @@ Q2_INT_BITS = 2
 Q2_FRAC_BITS = (32 - (1 + Q2_INT_BITS))
 Q16_INT_BITS = 16
 Q16_FRAC_BITS = (32 - (1 + Q16_INT_BITS))
+
+
+######## Types
+
+class TapClassifierModule(object):
+    def classify(self, tap_analysis):
+        pass
+
+
+class NozzleCleanerModule(object):
+    def clean_nozzle(self, attempt, retries, probe_pos):
+        pass
 
 
 class TapAnalysis:
@@ -245,6 +257,8 @@ class LoadCellProbeConfigHelper:
     def __init__(self, config, load_cell_inst):
         self._printer = config.get_printer()
         self._load_cell = load_cell_inst
+        gcode = config.get_printer().lookup_object('gcode')
+        self.dummy_gcode_cmd = gcode.create_gcode_command("", "", {})
         self._sensor = load_cell_inst.get_sensor()
         self._rest_time = 1. / float(self._sensor.get_samples_per_second())
         # Collect 4 x 60hz power cycles of data to average across power noise
@@ -255,6 +269,19 @@ class LoadCellProbeConfigHelper:
             default=75, minval=10, maxval=250)
         self._force_safety_limit_param = intParamHelper(config,
             'force_safety_limit', minval=100, maxval=5000, default=2000)
+        # pullback move
+        self._pullback_distance_param = floatParamHelper(config,
+            'pullback_distance', minval=0.01, maxval=2.0, default=0.2)
+        sps = self._sensor.get_samples_per_second()
+        self._pullback_speed_param = floatParamHelper(config, 'pullback_speed',
+            minval=0.1, maxval=1.0, default=sps * 0.001)
+        self._bad_tap_retries_param = intParamHelper(config, 'bad_tap_retries',
+            1, minval=0, maxval=10)
+
+    def _gcmd(self, gcmd=None):
+        if gcmd is None:
+            return self.dummy_gcode_cmd
+        return gcmd
 
     def get_tare_samples(self, gcmd=None):
         tare_time = self._tare_time_param.get(gcmd)
@@ -266,6 +293,15 @@ class LoadCellProbeConfigHelper:
 
     def get_safety_limit_grams(self, gcmd=None):
         return self._force_safety_limit_param.get(gcmd)
+
+    def get_pullback_speed(self, gcmd=None):
+        return self._pullback_speed_param.get(gcmd)
+
+    def get_pullback_distance(self, gcmd=None):
+        return self._pullback_distance_param.get(gcmd)
+
+    def get_bad_tap_retries(self, gcmd=None):
+        return self._bad_tap_retries_param.get(gcmd)
 
     def get_rest_time(self):
         return self._rest_time
@@ -501,9 +537,11 @@ class LoadCellProbingMove:
 
 # Perform a single complete tap
 class TappingMove:
-    def __init__(self, config, load_cell_probing_move, config_helper):
+    def __init__(self, config, load_cell_probing_move, tap_classifier_module,
+            config_helper):
         self._printer = config.get_printer()
         self._load_cell_probing_move = load_cell_probing_move
+        self._tap_classifier_module = tap_classifier_module
         self._config_helper = config_helper
         # track results of the last tap
         self._last_result = None
@@ -515,20 +553,32 @@ class TappingMove:
         self._clients.add_mux_endpoint("load_cell_probe/dump_taps",
             "load_cell_probe", name, header)
 
+    # Perform the pullback move and returns the time when the move will end
+    def pullback_move(self, gcmd):
+        toolhead = self._printer.lookup_object('toolhead')
+        pullback_pos = toolhead.get_position()
+        pullback_pos[2] += self._config_helper.get_pullback_distance(gcmd)
+        pos = [None, None, pullback_pos[2]]
+        toolhead.manual_move(pos, self._config_helper.get_pullback_speed(gcmd))
+        toolhead.flush_step_generation()
+        pullback_end = toolhead.get_last_move_time()
+        return pullback_end
+
     # perform a probing move and a pullback move
-    def run_tap(self, gcmd):
+    def run_tap(self, gcmd, report_errors=True):
         # do the descending move
         epos, collector = self._load_cell_probing_move.probing_move(gcmd)
-        # collect samples from the tap
-        toolhead = self._printer.lookup_object('toolhead')
-        toolhead.flush_step_generation()
-        move_end = toolhead.get_last_move_time()
-        results = collector.collect_until(move_end)
+        # do the pullback move
+        pullback_end_time = self.pullback_move(gcmd)
+        results = collector.collect_until(pullback_end_time)
         samples = check_sensor_errors(results, self._printer)
         # Analyze the tap data
-        ppa = TapAnalysis(samples)
+        tap_analysis = TapAnalysis(self._printer, samples)
+        tap_analysis.analyze(report_errors)
+        # allow the TapClassifier to override TapAnalysis result
+        self._tap_classifier_module.classify(tap_analysis)
         # broadcast tap event data:
-        self._clients.send({'tap': ppa.to_dict()})
+        self._clients.send({'tap': tap_analysis.to_dict()})
         self._is_last_result_valid = True
         self._last_result = epos[2]
         return epos, self._is_last_result_valid
@@ -567,12 +617,15 @@ class ProbeActivationHelper:
                 "Toolhead moved during probe deactivate_gcode script")
 
 
-# ProbeSession that implements Tap logic
+# ProbeSession that implements Tap and retry logic
 class TapSession:
-    def __init__(self, config, tapping_move, probe_params_helper):
+    def __init__(self, config, tapping_move, probe_params_helper,
+            nozzle_cleaner, config_helper):
         self._printer = config.get_printer()
         self._tapping_move = tapping_move
         self._probe_params_helper = probe_params_helper
+        self._nozzle_cleaner_module = nozzle_cleaner
+        self._config_helper = config_helper
         self._activator = ProbeActivationHelper(config)
         # Session state
         self._results = []
@@ -585,15 +638,63 @@ class TapSession:
         self._activator.deactivate_probe()
         self._results = []
 
+    # execute nozzle cleaning routine
+    def _clean_nozzle(self, retries, bad_taps, toolhead):
+        if self._nozzle_cleaner_module is None:
+            return
+        start_pos = toolhead.get_position()
+        self._nozzle_cleaner_module.clean_nozzle(retries, bad_taps,
+            start_pos)
+        if toolhead.get_position()[:3] != start_pos[:3]:
+            raise self._printer.command_error(
+                "Toolhead not returned after nozzle cleaning")
+
+    def _retract(self, params, toolhead):
+        # Note: retract at the current location, to allow nozzle cleaner
+        # to move the probing location to avoid fouling
+        pos = toolhead.get_position()
+        z = pos[2] + params['sample_retract_dist']
+        toolhead.manual_move([None, None, z], params['lift_speed'])
+
     # probe until a single good sample is returned or retries are exhausted
     def run_probe(self, gcmd):
-        epos, is_good = self._tapping_move.run_tap(gcmd)
-        self._results.append(epos)
+        toolhead = self._printer.lookup_object('toolhead')
+        params = self._probe_params_helper.get_probe_params(gcmd)
+        bad_taps = self._config_helper.get_bad_tap_retries(gcmd)
+        for retry in range(0, bad_taps):
+            if retry > 0:
+                self._retract(params, toolhead)
+                self._clean_nozzle(retry, bad_taps, toolhead)
+            epos, is_good = self._tapping_move.run_tap(gcmd)
+            if is_good:
+                self._results.append(epos)
+                return
+        raise self._printer.command_error(
+            'Too many bad taps. (bad_tap_retries: %i)' % (bad_taps,))
 
     def pull_probed_results(self):
         res = self._results
         self._results = []
         return res
+
+
+# A nozzle cleaner implementation that uses GCode from the probe's config
+class GcodeNozzleCleaner(NozzleCleanerModule):
+    def __init__(self, config):
+        printer = config.get_printer()
+        gcode_macro = printer.load_object(config, 'gcode_macro')
+        self._nozzle_cleaner_gcode = gcode_macro.load_template(config,
+            'nozzle_cleaner_gcode', '')
+
+    def clean_nozzle(self, attempt, retries, probe_pos):
+        context = self._nozzle_cleaner_gcode.create_template_context()
+        context['params'] = {
+            'RETRIES': attempt,
+            'RETRIES_REMAINING': retries - attempt,
+            'ORIGINAL_PROBE_X': probe_pos[0],
+            'ORIGINAL_PROBE_Y': probe_pos[1]
+        }
+        self._nozzle_cleaner_gcode.run_gcode_from_command(context)
 
 
 class LoadCellProbeCommands:
@@ -642,7 +743,11 @@ class LoadCellPrinterProbe:
         sensor_class = config.getchoice('sensor_type', sensors)
         sensor = sensor_class(config)
         self._load_cell = load_cell.LoadCell(config, sensor)
-        # Read all user configuration and build modules
+        # Read all user configuration and resolve plugin modules
+        tap_classifier = self._lookup_object(config, 'tap_classifier_module',
+            TapClassifierModule())
+        nozzle_cleaner = self._lookup_object(config, 'nozzle_cleaner_module',
+            GcodeNozzleCleaner(config))
         config_helper = LoadCellProbeConfigHelper(config, self._load_cell)
         self._mcu = self._load_cell.get_sensor().get_mcu()
         trigger_dispatch = mcu.TriggerDispatch(self._mcu)
@@ -659,14 +764,21 @@ class LoadCellPrinterProbe:
             self._mcu_load_cell_probe, self._param_helper,
             continuous_tare_filter_helper, config_helper)
         self._tapping_move = TappingMove(config, load_cell_probing_move,
-            config_helper)
-        tap_session = TapSession(config, self._tapping_move, self._param_helper)
+            tap_classifier, config_helper)
+        tap_session = TapSession(config, self._tapping_move, self._param_helper,
+            nozzle_cleaner, config_helper)
         self._probe_session = probe.ProbeSessionHelper(config,
             self._param_helper, tap_session.start_probe_session)
         # printer integration
         LoadCellProbeCommands(config, load_cell_probing_move)
         probe.ProbeVirtualEndstopDeprecation(config)
         self._printer.add_object('probe', self)
+
+    def _lookup_object(self, config, key, default):
+        config_section_name = config.get(key, default=None)
+        if config_section_name is None:
+            return default
+        return self._printer.lookup_object(config_section_name)
 
     def get_probe_params(self, gcmd=None):
         return self._param_helper.get_probe_params(gcmd)
