@@ -179,8 +179,13 @@ static const struct gpio_pwm_info pwm_regs[] = {
     {TIM5, GPIO('A', 11), 4, GPIO_FUNCTION(1)},
     {TIM5, GPIO('E', 14), 4, GPIO_FUNCTION(1)},
 #elif CONFIG_MACH_STM32G0
+  #if CONFIG_MACH_STM32G030
+    {TIM14, GPIO('A',  2), 1, GPIO_FUNCTION(5)},
+    {TIM14, GPIO('A',  3), 2, GPIO_FUNCTION(5)},
+  #else
     {TIM15, GPIO('A',  2), 1, GPIO_FUNCTION(5)},
     {TIM15, GPIO('A',  3), 2, GPIO_FUNCTION(5)},
+  #endif
     {TIM14, GPIO('A',  4), 1, GPIO_FUNCTION(4)},
     {TIM3,  GPIO('A',  6), 1, GPIO_FUNCTION(1)},
     {TIM3,  GPIO('A',  7), 2, GPIO_FUNCTION(1)},
@@ -199,10 +204,17 @@ static const struct gpio_pwm_info pwm_regs[] = {
     {TIM4,  GPIO('B',  8), 3, GPIO_FUNCTION(9)},
     {TIM4,  GPIO('B',  9), 4, GPIO_FUNCTION(9)},
   #endif
+  #if CONFIG_MACH_STM32G030
+    {TIM14, GPIO('B', 14), 1, GPIO_FUNCTION(5)},
+    {TIM14, GPIO('B', 15), 2, GPIO_FUNCTION(5)},
+    {TIM14, GPIO('C',  1), 1, GPIO_FUNCTION(2)},
+    {TIM14, GPIO('C',  2), 2, GPIO_FUNCTION(2)},
+  #else
     {TIM15, GPIO('B', 14), 1, GPIO_FUNCTION(5)},
     {TIM15, GPIO('B', 15), 2, GPIO_FUNCTION(5)},
     {TIM15, GPIO('C',  1), 1, GPIO_FUNCTION(2)},
     {TIM15, GPIO('C',  2), 2, GPIO_FUNCTION(2)},
+  #endif
     {TIM3,  GPIO('C',  6), 1, GPIO_FUNCTION(1)},
     {TIM3,  GPIO('C',  7), 2, GPIO_FUNCTION(1)},
     {TIM3,  GPIO('C',  8), 3, GPIO_FUNCTION(1)},
@@ -227,8 +239,13 @@ static const struct gpio_pwm_info pwm_regs[] = {
     {TIM1,  GPIO('E', 13), 3, GPIO_FUNCTION(1)},
     {TIM1,  GPIO('E', 14), 4, GPIO_FUNCTION(1)},
     {TIM14, GPIO('F',  0), 1, GPIO_FUNCTION(2)},
+  #if CONFIG_MACH_STM32G030
+    {TIM14, GPIO('F', 12), 1, GPIO_FUNCTION(0)},
+    {TIM14, GPIO('F', 13), 2, GPIO_FUNCTION(0)},
+  #else
     {TIM15, GPIO('F', 12), 1, GPIO_FUNCTION(0)},
     {TIM15, GPIO('F', 13), 2, GPIO_FUNCTION(0)},
+  #endif
 #elif CONFIG_MACH_STM32H7
     {TIM2, GPIO('A', 0),  1, GPIO_FUNCTION(1)},
     {TIM2, GPIO('A', 5),  1, GPIO_FUNCTION(1)},

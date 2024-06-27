@@ -64,8 +64,10 @@ lookup_clock_line(uint32_t periph_base)
         return (struct cline){.en=&RCC->APBENR2,.rst=&RCC->APBRSTR2,.bit=1<<14};
     if (periph_base == TIM14_BASE)
         return (struct cline){.en=&RCC->APBENR2,.rst=&RCC->APBRSTR2,.bit=1<<15};
+#ifdef TIM15_BASE
     if (periph_base == TIM15_BASE)
         return (struct cline){.en=&RCC->APBENR2,.rst=&RCC->APBRSTR2,.bit=1<<16};
+#endif
     if (periph_base == TIM16_BASE)
         return (struct cline){.en=&RCC->APBENR2,.rst=&RCC->APBRSTR2,.bit=1<<17};
     if (periph_base == TIM17_BASE)
@@ -162,8 +164,10 @@ bootloader_request(void)
 void
 armcm_main(void)
 {
+#ifdef SYSCFG_CFGR1_UCPD1_STROBE   
     // Disable internal pull-down resistors on UCPDx CCx pins
     SYSCFG->CFGR1 |= (SYSCFG_CFGR1_UCPD1_STROBE | SYSCFG_CFGR1_UCPD2_STROBE);
+#endif
     SCB->VTOR = (uint32_t)VectorTable;
 
     // Reset clock registers (in case bootloader has changed them)
