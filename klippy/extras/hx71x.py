@@ -4,7 +4,9 @@
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 import collections
-import logging, struct
+import logging
+import struct
+
 from . import bulk_sensor
 from .bulk_sensor_adc import (BulkSensorAdc, LoadCellEndstopSensor,
                               TimestampHelper)
@@ -30,7 +32,7 @@ class HX71xBase(BulkSensorAdc, LoadCellEndstopSensor):
         self.printer = printer = config.get_printer()
         self.name = config.get_name().split()[-1]
         self.query_hx71x_cmd = None
-        ## Chip options
+        # Chip options
         dout_pin_name = config.get('dout_pin')
         sclk_pin_name = config.get('sclk_pin')
         ppins = printer.lookup_object('pins')
@@ -52,20 +54,20 @@ class HX71xBase(BulkSensorAdc, LoadCellEndstopSensor):
         # gain/channel choices
         self.gain_channel = int(config.getchoice('gain', gain_options,
                                                  default=default_gain))
-        ## Command Configuration
+        # Command Configuration
         self.mcu.register_config_callback(self._build_config)
-        ## Measurement conversion
+        # Measurement conversion
         self.bytes_per_block = BYTES_PER_SAMPLE
         self.blocks_per_msg = (bulk_sensor.MAX_BULK_MSG_SIZE
                                // BYTES_PER_SAMPLE)
         self._unpack_block = struct.Struct("<i").unpack_from
-        ## Bulk Sensor Setup
+        # Bulk Sensor Setup
         self.bulk_queue = bulk_sensor.BulkDataQueue(self.mcu, oid=self.oid)
         # Clock tracking
         chip_smooth = self.sps * UPDATE_INTERVAL * 2
         self.clock_sync = bulk_sensor.ClockSyncRegression(self.mcu, chip_smooth)
-        self.clock_updater = bulk_sensor.ChipClockUpdater(self.clock_sync,
-                                                          BYTES_PER_SAMPLE)
+        # self.clock_updater = bulk_sensor.ChipClockUpdater(self.clock_sync, BYTES_PER_SAMPLE)
+        self.clock_updater = bulk_sensor.FixedFreqReader(self.mcu, chip_smooth, "<i")
         # Process messages in batches
         self.batch_bulk = bulk_sensor.BatchBulkHelper(
             self.printer, self._process_batch, self._start_measurements,
@@ -120,7 +122,7 @@ class HX71xBase(BulkSensorAdc, LoadCellEndstopSensor):
                                      self.blocks_per_msg)
         for params in raw_samples:
             timestamps.update_sequence(params['sequence'])
-            #logging.info("Hx717 Data: %s " % (params['data'],))
+            # logging.info("Hx717 Data: %s " % (params['data'],))
             data = bytearray(params['data'])
             for i in range(len(data) // BYTES_PER_SAMPLE):
                 counts = unpack_block(data, offset=BYTES_PER_SAMPLE * i)
@@ -133,7 +135,7 @@ class HX71xBase(BulkSensorAdc, LoadCellEndstopSensor):
     # Start, stop, and process message batches
     def _start_measurements(self):
         # Start bulk reading
-        self.bulk_queue.clear_samples()
+        self.bulk_queue.clear_queue()
         rest_ticks = self.mcu.seconds_to_clock(self.duty_cycle / self.sps)
         self.query_hx71x_cmd.send([self.oid, rest_ticks])
         logging.info("HX71x '%s' starting measurements", self.name)
@@ -143,12 +145,12 @@ class HX71xBase(BulkSensorAdc, LoadCellEndstopSensor):
     def _finish_measurements(self):
         # Halt bulk reading
         self.query_hx71x_cmd.send_wait_ack([self.oid, 0])
-        self.bulk_queue.clear_samples()
+        self.bulk_queue.clear_queue()
         logging.info("HX71x '%s' finished measurements", self.name)
 
     def _process_batch(self, eventtime):
         self.clock_updater.update_clock()
-        raw_samples = self.bulk_queue.pull_samples()
+        raw_samples = self.bulk_queue.pull_queue()
         if not raw_samples:
             return {}
         samples = self._extract_samples(raw_samples)
@@ -159,21 +161,25 @@ class HX71xBase(BulkSensorAdc, LoadCellEndstopSensor):
 
 class HX711(HX71xBase):
     def __init__(self, config):
-        super(HX711, self).__init__(config,
-                                    # HX711 sps options
-                                    {80: 80, 10: 10}, 80,
-                                    # HX711 gain/channel options
-                                    {'A-128': 1, 'B-32': 2, 'A-64': 3}, 'A-128')
+        super(HX711, self).__init__(
+            config,
+            # HX711 sps options
+            {80: 80, 10: 10}, 80,
+            # HX711 gain/channel options
+            {'A-128': 1, 'B-32': 2, 'A-64': 3}, 'A-128',
+        )
 
 
 class HX717(HX71xBase):
     def __init__(self, config):
-        super(HX717, self).__init__(config,
-                                    # HX717 sps options
-                                    {320: 320, 80: 80, 20: 20, 10: 10}, 320,
-                                    # HX717 gain/channel options
-                                    {'A-128': 1, 'B-64': 2, 'A-64': 3,
-                                     'B-8': 4}, 'A-128')
+        super(HX717, self).__init__(
+            config,
+            # HX717 sps options
+            {320: 320, 80: 80, 20: 20, 10: 10}, 320,
+            # HX717 gain/channel options
+            {'A-128': 1, 'B-64': 2, 'A-64': 3,
+             'B-8': 4}, 'A-128',
+        )
 
 
 HX71X_SENSOR_TYPES = {
