@@ -129,9 +129,9 @@ a macro:
 
 ## Related Documentation
 
-* [load_cell_probe Config Reference](Config_Reference.md#load_cell_probe)
-* [load_cell_probe G-Code Commands](G-Codes.md#load_cell_probe)
-* [load_cell_probe Statuc Reference](Status_Reference.md#load_cell_probe)
+* [[load_cell_probe] Config Reference](Config_Reference.md#load_cell_probe)
+* [[load_cell_probe] G-Code Commands](G-Codes.md#load_cell_probe)
+* [[load_cell_probe] Status Reference](Status_Reference.md#load_cell_probe)
 
 ## Load Cell Probe Safety
 
@@ -327,6 +327,11 @@ Here is a suggested sequence:
 1. Scrub the nozzle on a brush
 1. Heat soak the print bed
 1. Perform probing tasks: QGL, bed mesh etc.
+
+### Nozzle Cleaner GCode
+[load_cell_probe] support a `nozzle_cleaner_gcode` option. This is run when
+an invalid tap is detected during a probe. These bad taps are usually due to
+ooze on the nozzle.
 
 ### Temperature Compensation for Nozzle Growth
 
