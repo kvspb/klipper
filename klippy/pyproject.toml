@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "klippy"
+version = "0.1.0"
+description = ""
+authors = ["Valery Komarov <komarov@valerka.net>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+
+cffi = "1.14.6"
+pyserial = "3.4"
+greenlet = "2.0.2"
+Jinja2 = "2.11.3"
+python-can = "3.3.4"
+markupsafe = "1.1.1"
+numpy = "2.0.0"
+scipy = "1.14.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
