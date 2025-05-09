@@ -509,17 +509,19 @@ class TapAnalysis(object):
 # stores name and constraints to keep things DRY
 class ParamHelper:
     def __init__(self, config, name, type_name, default=None, minval=None,
-            maxval=None, above=None, below=None, max_len=None):
+            maxval=None, above=None, below=None, max_len=None, choices=None):
         self._config_section = config.section
         self._config_error = config.error
         self.name = name
         self._type_name = type_name
         self.value = default
+        self.default_choice = default
         self.minval = minval
         self.maxval = maxval
         self.above = above
         self.below = below
         self.max_len = max_len
+        self.choices = choices
         # read from config once
         self.value = self.get(config=config)
 
@@ -560,6 +562,18 @@ class ParamHelper:
         return get(self._get_name(gcmd), self.value, minval or self.minval,
             maxval or self.maxval, above or self.above, below or self.below)
 
+    def _get_choice(self, config, gcmd):
+        name = self._get_name(gcmd)
+        if gcmd:
+            c = gcmd.get(name, default=self.default_choice)
+            if not c in self.choices:
+                raise gcmd.error("Choice '%s' for option '%s' is not a valid "
+                                 "choice" % (c, name))
+            return self.choices[c]
+        else:
+            return config.getchoice(name, self.choices,
+                default=self.default_choice)
+
     def _get_float_list(self, config, gcmd, above, below):
         # this code defaults to the empty list, never return None
         default = (self.value or [])
@@ -592,6 +606,8 @@ class ParamHelper:
             return self._get_int(config, gcmd, minval, maxval)
         elif self._type_name == 'float':
             return self._get_float(config, gcmd, minval, maxval, above, below)
+        elif self._type_name == 'choice':
+            return self._get_choice(config, gcmd)
         else:
             return self._get_float_list(config, gcmd, above, below)
 
@@ -605,6 +621,10 @@ def floatParamHelper(config, name, default=None, minval=None, maxval=None,
         above=None, below=None):
     return ParamHelper(config, name, 'float', default, minval=minval,
         maxval=maxval, above=above, below=below)
+
+
+def choiceParamHelper(config, name, default, choices):
+    return ParamHelper(config, name, 'choice', default=default, choices=choices)
 
 
 def floatListParamHelper(config, name, default=None, above=None, below=None,
@@ -716,6 +736,17 @@ def check_sensor_errors(results, printer):
     return samples
 
 
+# Bad Tap retry strategy options
+STRATEGY_FAIL = 0
+STRATEGY_IGNORE = 1
+STRATEGY_RETRY = 2
+STRATEGY_CIRCLE = 3
+STRATEGY_CHOICES = {
+    'FAIL': STRATEGY_FAIL, 'IGNORE': STRATEGY_IGNORE,
+    'RETRY': STRATEGY_RETRY, 'CIRCLE': STRATEGY_CIRCLE
+}
+
+
 class LoadCellProbeConfigHelper:
     def __init__(self, config, load_cell_inst):
         self._printer = config.get_printer()
@@ -741,8 +772,14 @@ class LoadCellProbeConfigHelper:
         sps = self._sensor.get_samples_per_second()
         self._pullback_speed_param = floatParamHelper(config, 'pullback_speed',
             minval=0.1, maxval=1.0, default=sps * 0.001)
+        self._bad_tap_strategy_param = choiceParamHelper(config,
+            'bad_tap_strategy', 'RETRY', STRATEGY_CHOICES)
+        max_bad_taps = len(TapLocation.LOOKUP)
         self._bad_tap_retries_param = intParamHelper(config, 'bad_tap_retries',
-            1, minval=0, maxval=10)
+            default=6, minval=0, maxval=max_bad_taps)
+        # most probes don't move horizontally, but this one does
+        self._horizontal_speed = floatParamHelper(config, 'horizontal_speed',
+            above=0.1, default=50.)
 
     def _gcmd(self, gcmd=None):
         if gcmd is None:
@@ -766,8 +803,14 @@ class LoadCellProbeConfigHelper:
     def get_pullback_distance(self, gcmd=None):
         return self._pullback_distance_param.get(gcmd)
 
+    def get_bad_tap_strategy(self, gcmd=None):
+        return self._bad_tap_strategy_param.get(gcmd)
+
     def get_bad_tap_retries(self, gcmd=None):
         return self._bad_tap_retries_param.get(gcmd)
+
+    def get_horizontal_speed(self, gcmd=None):
+        return self._horizontal_speed.get(gcmd)
 
     def get_rest_time(self):
         return self._rest_time
@@ -1085,6 +1128,53 @@ class ProbeActivationHelper:
                 "Toolhead moved during probe deactivate_gcode script")
 
 
+# build a table of x,y locations around a zero point to tap at
+# distance_step is the radius increase for each ring and the minimum distance
+# between probes. 2 rings are used.
+def build_tap_location_lookup(distance_step):
+    lookup = [(0, 0)]
+    radius = 0
+    for i in range(1, 3):
+        radius += distance_step
+        perimeter = 2. * radius * math.pi
+        locations = int(perimeter / distance_step)
+        for j in range(locations):
+            distance = float(j) / float(locations) * 2 * math.pi
+            x = math.cos(distance) * radius
+            y = math.sin(distance) * radius
+            lookup.append((x, y))
+    return lookup
+
+
+# Tracks an original requested probing location and fouled locations around it
+class TapLocation:
+    DISTANCE = 2.0  # TODO: maybe make this configurable? 1mm-3mm?
+    LOOKUP = build_tap_location_lookup(DISTANCE)
+
+    def __init__(self, pos, retries):
+        self._pos = pos
+        self._retries = retries
+        self._fouled_count = 0
+        self._radius = 0.
+        if retries > len(self.LOOKUP):
+            raise ValueError("Max probe retries exceeded")
+
+    # true if there are more clean positions
+    def has_retries(self):
+        return self._fouled_count < self._retries
+
+    # mark the current location as fouled, advance the position counter
+    def mark_fouled(self):
+        self._fouled_count += 1
+
+    # return (x,y) position of the next clean place to tap
+    def get_position(self):
+        if not self.has_retries():
+            return None
+        x, y = self.LOOKUP[self._fouled_count]
+        return self._pos[0] + x, self._pos[1] + y
+
+
 # ProbeSession that implements Tap and retry logic
 class TapSession:
     def __init__(self, config, tapping_move, probe_params_helper,
@@ -1097,6 +1187,7 @@ class TapSession:
         self._activator = ProbeActivationHelper(config)
         # Session state
         self._results = []
+        self._locations = {}
 
     def start_probe_session(self, gcmd):
         self._activator.activate_probe()
@@ -1105,35 +1196,74 @@ class TapSession:
     def end_probe_session(self):
         self._activator.deactivate_probe()
         self._results = []
+        self._locations = {}
 
     # execute nozzle cleaning routine
-    def clean_nozzle(self, retries, bad_taps, probe_pos):
-        self._nozzle_cleaner_module.clean_nozzle(retries, bad_taps, probe_pos)
+    def _clean_nozzle(self, retries, bad_taps, toolhead):
+        if self._nozzle_cleaner_module is None:
+            return
+        start_pos = toolhead.get_position()
+        self._nozzle_cleaner_module.clean_nozzle(retries, bad_taps,
+            start_pos)
+        if toolhead.get_position()[:3] != start_pos[:3]:
+            raise self._printer.command_error(
+                "Toolhead not returned after nozzle cleaning")
 
-    def retract(self, params):
-        # Note: retract at the current location, to allow nozzle cleaner
-        # to move the probing location to avoid fouling
-        toolhead = self._printer.lookup_object('toolhead')
+    def _retract(self, params, toolhead):
         pos = toolhead.get_position()
         z = pos[2] + params['sample_retract_dist']
         toolhead.manual_move([None, None, z], params['lift_speed'])
 
+    # move to probing x,y location for circular retry strategy
+    def _horizontal_move(self, location, gcmd, toolhead):
+        x, y = location.get_position()
+        toolhead.manual_move([x, y, None],
+            self._config_helper.get_horizontal_speed(gcmd))
+
+    # get/update TapLocation tracking
+    def _get_location(self, bad_taps, toolhead):
+        origin_pos = tuple(toolhead.get_position()[:2])
+        if not origin_pos in self._locations:
+            self._locations[origin_pos] = TapLocation(origin_pos, bad_taps)
+        return self._locations[origin_pos], origin_pos
+
+    # test if a tap can be retried
+    def _can_retry(self, strategy, attempt, retries, location):
+        if attempt == 0:
+            return True
+        if strategy == STRATEGY_CIRCLE:
+            return location.has_retries()
+        if strategy == STRATEGY_RETRY:
+            return attempt < retries  # BUG: off by 1?
+        else:
+            return False  # strategies that dont allow retries
+
     # probe until a single good sample is returned or retries are exhausted
     def run_probe(self, gcmd):
         toolhead = self._printer.lookup_object('toolhead')
-        origin_pos = toolhead.get_position()
         params = self._probe_params_helper.get_probe_params(gcmd)
-        bad_taps = self._config_helper.get_bad_tap_retries(gcmd)
-        for retry in range(0, bad_taps):
-            if retry > 0:
-                self.retract(params)
-                self.clean_nozzle(retry, bad_taps, origin_pos)
+        strategy = self._config_helper.get_bad_tap_strategy(gcmd)
+        retries = self._config_helper.get_bad_tap_retries(gcmd)
+        location, origin_pos = self._get_location(retries, toolhead)
+        attempt = 0
+        while self._can_retry(strategy, attempt, retries, location):
+            # perform tasks between attempts
+            if attempt > 0:
+                self._retract(params, toolhead)
+                self._clean_nozzle(attempt, retries, toolhead)
+            # for the circular strategy, move the probe to the probing location
+            if strategy == STRATEGY_CIRCLE:
+                self._horizontal_move(location, gcmd, toolhead)
             epos, is_good = self._tapping_move.run_tap(gcmd)
-            if is_good:
+            if strategy == STRATEGY_FAIL and is_good == False:
+                raise self._printer.command_error('Tap failed validation')
+            if is_good or strategy == STRATEGY_IGNORE:
                 self._results.append(epos)
                 return
+            location.mark_fouled()
+            attempt += 1
         raise self._printer.command_error(
-            'Too many bad taps. (bad_tap_retries: %i)' % (bad_taps,))
+            'Too many bad taps. (bad_tap_retries: %i)' % (retries,))
 
     def pull_probed_results(self):
         res = self._results
@@ -1143,21 +1273,19 @@ class TapSession:
 
 # A nozzle cleaner implementation that uses GCode from the probe's config
 class GcodeNozzleCleaner(NozzleCleanerModule):
-    # if no custom gcode is set up this warning message is printed instead
-    NOZZLE_CLEANER = "{action_respond_info(\"Bad tap detected, nozzle needs" \
-                     " cleaning. nozzle_cleaner_gcode not configured!\")}"
-
     def __init__(self, config):
         printer = config.get_printer()
         gcode_macro = printer.load_object(config, 'gcode_macro')
         self._nozzle_cleaner_gcode = gcode_macro.load_template(config,
-            'nozzle_cleaner_gcode', GcodeNozzleCleaner.NOZZLE_CLEANER)
+            'nozzle_cleaner_gcode', '')
 
     def clean_nozzle(self, attempt, retries, probe_pos):
         context = self._nozzle_cleaner_gcode.create_template_context()
         context['params'] = {
-            'RETRIES': attempt, 'RETRIES_REMAINING': retries - attempt,
-            'ORIGINAL_PROBE_X': probe_pos[0], 'ORIGINAL_PROBE_Y': probe_pos[1]
+            'RETRIES': attempt,
+            'RETRIES_REMAINING': retries - attempt,
+            'ORIGINAL_PROBE_X': probe_pos[0],
+            'ORIGINAL_PROBE_Y': probe_pos[1]
         }
         self._nozzle_cleaner_gcode.run_gcode_from_command(context)
 
