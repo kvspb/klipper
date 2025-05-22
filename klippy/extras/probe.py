@@ -265,6 +265,17 @@ class HomingViaProbeHelper:
         self.results = []
         self.mcu_probe.multi_probe_end()
 
+class ProbeVirtualEndstopDeprecation:
+    def __init__(self, config):
+        self._name = config.get_name()
+        self._printer = config.get_printer()
+        # Register z_virtual_endstop pin
+        self._printer.lookup_object('pins').register_chip('probe', self)
+    def setup_pin(self, pin_type, pin_params):
+        raise self._printer.config_error(
+            "Module [%s] does not support `probe:z_virtual_endstop`"
+            ", use a pin instead." % (self._name,))
+
 # Helper to read multi-sample parameters from config
 class ProbeParameterHelper:
     def __init__(self, config):
@@ -364,7 +375,6 @@ class ProbeSessionHelper:
             self._probe_state_error()
         params = self.param_helper.get_probe_params(gcmd)
         toolhead = self.printer.lookup_object('toolhead')
-        probexy = toolhead.get_position()[:2]
         retries = 0
         positions = []
         sample_count = params['samples']
@@ -383,7 +393,7 @@ class ProbeSessionHelper:
             # Retract
             if len(positions) < sample_count:
                 toolhead.manual_move(
-                    probexy + [pos[2] + params['sample_retract_dist']],
+                    [None, None, pos[2] + params['sample_retract_dist']],
                     params['lift_speed'])
         # Calculate result
         epos = calc_probe_z_average(positions, params['samples_result'])

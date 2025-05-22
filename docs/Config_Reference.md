@@ -5128,6 +5128,88 @@ data_ready_pin:
 #   and 'analog_supply'. Default is 'internal'.
 ```
 
+### [load_cell_probe]
+Load Cell Probe. This combines the functionality of a [probe] and a [load_cell].
+
+```
+[load_cell_probe]
+sensor_type:
+#   This must be one of the supported bulk ADC sensor types and support
+#   load cell endstops on the mcu.
+#counts_per_gram:
+#reference_tare_counts:
+#sensor_orientation:
+#   These parameters must be configured before the probe will operate.
+#   See the [load_cell] section for further details.
+#force_safety_limit: 2000
+#   The safe limit for probing force relative to the reference_tare_counts on
+#   the load_cell. The default is +/-2Kg.
+#trigger_force: 75.0
+#   The force that the probe will trigger at. 75g is the default.
+#drift_filter_cutoff_frequency: 0.8
+#   Enable optional continuous taring while homing & probing to reject drift.
+#   The value is a frequency, in Hz, below which drift will be ignored. This
+#   option requires the SciPy library. Default: None
+#drift_filter_delay: 2
+#   The delay, or 'order', of the drift filter. This controls the number of
+#   samples required to make a trigger detection. Can be 1 or 2, the default
+#   is 2.
+#buzz_filter_cutoff_frequency: 100.0
+#   The value is a frequency, in Hz, above which high frequency noise in the
+#   load cell will be igfiltered outnored. This option requires the SciPy
+#   library. Default: None
+#buzz_filter_delay: 2
+#   The delay, or 'order', of the buzz filter. This controle the number of
+#   samples required to make a trigger detection. Can be 1 or 2, the default
+#   is 2.
+#notch_filter_frequencies: 50, 60
+#   1 or 2 frequencies, in Hz, to filter out of the load cell data. This is
+#   intended to reject power line noise. This option requires the SciPy
+#   library. Default: None
+#notch_filter_quality: 2.0
+#   Controls how narrow the range of frequencies are that the notch filter
+#   removes. Larger numbers produce a narrower filter. Minimum value is 0.5 and
+#   maximum is 3.0. Default: 2.0
+#tare_time:
+#   The rime in seconds used for taring the load_cell before each probe. The
+#   default value is: 4 / 60 = 0.066. This collects samples from 4 cycles of
+#   60Hz mains power to cancel power line noise.
+#pullback_distance:
+#   The length of the pullback move. The default is 0.2mm and is a safe
+#   starting point for most beds. This can be decreased if the motion system
+#   is very ridgid
+#pullback_speed:
+#   The speed of the pullback move. The default value is 1.0 micron per sensor
+#   sample. Increasing this value will speed up the move and reduce accuracy.
+#bad_tap_retries: 1
+#   Number of attempts that the probe shoudld make before failing. One retry
+#   will cause the probe to be cleaned once and make a second probe attempt.
+#   Default: 1
+#nozzle_cleaner_gcode:
+#   A GCode macro to clean the nozzle when a bad tap is detected. The default
+#   macro prints a warning message that no nozzle cleaner is set up.
+#   Default: None
+#nozzle_cleaner_module:
+#   The name of a config section that sets up a custom nozzle cleaner module.
+#   The nozzle cleaner module supersceeds the nozzle_cleaner_gcode.
+#   Default: None.
+#bad_tap_module:
+#   The name of a config section that sets up a custom Bad Tap module. A Bad Tap
+#   module can perform details analysis of the tap data and decide if it
+#   is a bad tap or a good tap. The default is None.
+#z_offset:
+#speed:
+#samples:
+#sample_retract_dist:
+#lift_speed:
+#samples_result:
+#samples_tolerance:
+#samples_tolerance_retries:
+#activate_gcode:
+#deactivate_gcode:
+#   See the "[probe]" section for a description of the above parameters.
+```
+
 ## Board specific hardware support
 
 ### [sx1509]
