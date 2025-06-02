@@ -877,7 +877,7 @@ inherits them from the specified `primary_carriage`, thus sharing
 the same range of motion with the primary carriage.
 
 For the references on how to configure IDEX setups, see the
-[dual carriage](#dual-carriage) section.
+[dual carriage](#dual_carriage) section.
 
 ### None Kinematics
 
@@ -1407,7 +1407,9 @@ the nature of skew correction these lengths are set via gcode. See
 Temperature-dependant toolhead Z position adjustment. Compensate for vertical
 toolhead movement caused by thermal expansion of the printer's frame in
 real-time using a temperature sensor (typically coupled to a vertical section
-of frame).
+of frame). Multiple sections may be defined as [z_thermal_adjust component] to
+compensate for thermal expansion in different printer components, such as the
+hotend, heatbreak and frame.
 
 See also: [extended g-code commands](G-Codes.md#z_thermal_adjust).
 
@@ -1751,7 +1753,7 @@ Enables support to exclude or cancel individual objects during the printing
 process.
 
 See the [exclude objects guide](Exclude_Object.md) and
-[command reference](G-Codes.md#excludeobject)
+[command reference](G-Codes.md#exclude_object)
 for additional information. See the
 [sample-macros.cfg](../config/sample-macros.cfg) file for a
 Marlin/RepRapFirmware compatible M486 G-Code macro.
@@ -2461,8 +2463,8 @@ position_max:
 #homing_positive_dir:
 ...
 ```
-Refer to [generic cartesian](#generic-cartesian) section for more information
-on the regular `carriage` parameters.
+Refer to [generic cartesian](#generic-cartesian-kinematics) section for more
+information on the regular `carriage` parameters.
 
 Then a user must define one or more stepper motors moving the dual carriage
 (and other carriages as appropriate), for instance
@@ -5159,21 +5161,52 @@ sensor_type:
 #   load cell will be igfiltered outnored. This option requires the SciPy
 #   library. Default: None
 #buzz_filter_delay: 2
-#   The delay, or 'order', of the buzz filter. This controle the number of
+#   The delay, or 'order', of the buzz filter. This controles the number of
 #   samples required to make a trigger detection. Can be 1 or 2, the default
 #   is 2.
 #notch_filter_frequencies: 50, 60
 #   1 or 2 frequencies, in Hz, to filter out of the load cell data. This is
 #   intended to reject power line noise. This option requires the SciPy
-#   library.  Default: None
+#   library. Default: None
 #notch_filter_quality: 2.0
 #   Controls how narrow the range of frequencies are that the notch filter
 #   removes. Larger numbers produce a narrower filter. Minimum value is 0.5 and
 #   maximum is 3.0. Default: 2.0
 #tare_time:
-#   The rime in seconds used for taring the load_cell before each probe. The
+#   The time in seconds used for taring the load_cell before each probe. The
 #   default value is: 4 / 60 = 0.066. This collects samples from 4 cycles of
 #   60Hz mains power to cancel power line noise.
+#pullback_distance:
+#   The length of the pullback move. The default is 0.2mm and is a safe
+#   starting point for most beds. This can be decreased if the motion system
+#   is very ridgid
+#pullback_speed:
+#   The speed of the pullback move. The default value is 1.0 micron per sensor
+#   sample. Increasing this value will speed up the move but reduce accuracy.
+#bad_tap_strategy: RETRY
+#   This options controls how the probe behaves when a tap analsys fails. There
+#   are 4 options:
+#   FAIL   - An error will be raised ending the gcode program
+#   IGNORE - The failure will be ignored and the z position captured when
+#            the probe triggered will be used instead.
+#   RETRY  - The probe will be retried at the same X/Y position
+#   CIRCLE - The location where the probe failed will be marked as 'fouled'.
+#            A new positon in a circular patter will be used for the next
+#            attempt.
+#   The default is RETRY
+#bad_tap_retries: 6
+#   Number of attempts that the probe should make before failing. The max is
+#   18. The default is 6
+#nozzle_cleaner_gcode:
+#   Amn optional GCode macro to clean the nozzle when a bad tap is detected.
+#   Default: None
+#nozzle_cleaner_module:
+#   The name of a config section that sets up a custom nozzle cleaner module.
+#   The nozzle cleaner module replaces nozzle_cleaner_gcode. Default: None
+#tap_classifier_module:
+#   The name of a config section that sets up a custom Tap Classifier module. A
+#   Tap Classifier module can perform detaild analysis of the tap data and
+#   decide if it is a bad tap or a good tap. Default: None
 #z_offset:
 #speed:
 #samples:
