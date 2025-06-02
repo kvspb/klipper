@@ -150,11 +150,18 @@ class ProbeCommandHelper:
         for i in range(len(positions)):
             deviation_sum += pow(positions[i][2] - avg_value, 2.)
         sigma = (deviation_sum / len(positions)) ** 0.5
+        # calculate the average delta between successive probes
+        delta_sum = 0
+        for i in range(1, len(positions)):
+            delta_sum += abs(positions[i][2] - positions[i - 1][2])
+        avg_delta = (delta_sum / (len(positions) - 1))
         # Show information
         gcmd.respond_info(
             "probe accuracy results: maximum %.6f, minimum %.6f, range %.6f, "
-            "average %.6f, median %.6f, standard deviation %.6f" % (
-            max_value, min_value, range_value, avg_value, median, sigma))
+            "average %.6f, median %.6f, standard deviation %.6f, "
+            "average delta %.6f" % (
+            max_value, min_value, range_value, avg_value, median, sigma,
+            avg_delta))
     cmd_Z_OFFSET_APPLY_PROBE_help = "Adjust the probe's z_offset"
     def cmd_Z_OFFSET_APPLY_PROBE(self, gcmd):
         gcode_move = self.printer.lookup_object("gcode_move")
@@ -375,7 +382,6 @@ class ProbeSessionHelper:
             self._probe_state_error()
         params = self.param_helper.get_probe_params(gcmd)
         toolhead = self.printer.lookup_object('toolhead')
-        probexy = toolhead.get_position()[:2]
         retries = 0
         positions = []
         sample_count = params['samples']
@@ -394,7 +400,7 @@ class ProbeSessionHelper:
             # Retract
             if len(positions) < sample_count:
                 toolhead.manual_move(
-                    probexy + [pos[2] + params['sample_retract_dist']],
+                    [None, None, pos[2] + params['sample_retract_dist']],
                     params['lift_speed'])
         # Calculate result
         epos = calc_probe_z_average(positions, params['samples_result'])
@@ -452,7 +458,16 @@ class ProbePointsHelper:
         return self.lift_speed
     def _move(self, coord, speed):
         self.printer.lookup_object('toolhead').manual_move(coord, speed)
-    def _raise_tool(self, is_first=False):
+    def _raise_tool(self):
+        toolhead = self.printer.lookup_object('toolhead')
+        z_pos = toolhead.get_position()[2]
+        target_z = max(self.horizontal_move_z,
+                       z_pos + self.horizontal_move_z)
+        # assume z position is OK if higher than target_z
+        if z_pos >= target_z:
+            return
+        self._move([None, None, target_z], self.lift_speed)
+    def _raise_tool_manual(self, is_first=False):
         speed = self.lift_speed
         if is_first:
             # Use full speed to first probe position
@@ -496,7 +511,7 @@ class ProbePointsHelper:
         probe_session = probe.start_probe_session(gcmd)
         probe_num = 0
         while 1:
-            self._raise_tool(not probe_num)
+            self._raise_tool()
             if probe_num >= len(self.probe_points):
                 results = probe_session.pull_probed_results()
                 done = self._invoke_callback(results)
@@ -509,7 +524,7 @@ class ProbePointsHelper:
             probe_num += 1
         probe_session.end_probe_session()
     def _manual_probe_start(self):
-        self._raise_tool(not self.manual_results)
+        self._raise_tool_manual(not self.manual_results)
         if len(self.manual_results) >= len(self.probe_points):
             done = self._invoke_callback(self.manual_results)
             if done:
