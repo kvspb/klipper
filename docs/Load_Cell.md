@@ -26,10 +26,15 @@ $ LOAD_CELL_DIAGNOSTIC
 
 Things you can check with this data:
 
-* The configured sample rate of the sensor should be close to the 'Measured samples per second' value. If it is not you may have a configuration or wiring issue.
-* 'Saturated samples' should be 0. If you have saturated samples it means the load sell is seeing more force than it can measure.
-* 'Unique values' should be a large percentage of the 'Samples Collected' value. If 'Unique values' is 1 it is very likely a wiring issue.
-* Tap or push on the sensor while `LOAD_CELL_DIAGNOSTIC` runs. If things are working correctly this should increase the 'Sample range'.
+* The configured sample rate of the sensor should be close to the 'Measured
+  samples per second' value. If it is not you may have a configuration or wiring
+  issue.
+* 'Saturated samples' should be 0. If you have saturated samples it means the
+  load sell is seeing more force than it can measure.
+* 'Unique values' should be a large percentage of the 'Samples
+  Collected' value. If 'Unique values' is 1 it is very likely a wiring issue.
+* Tap or push on the sensor while `LOAD_CELL_DIAGNOSTIC` runs. If
+  things are working correctly this should increase the 'Sample range'.
 
 ### Calibrating a Load Cell
 
@@ -126,7 +131,11 @@ This is the maximum absolute force, relative to `reference_tare_counts`, that th
 
 The first risk this protects against is picking too large of a value for `drift_filter_cutoff_frequency`. This can cause the drift filter to filter out a probe collision event and continue the probing move. If this happens the `force_safety_limit` acts as a backup protection.
 
-The second problem is probing repeatedly in one place. Klipper does not retract the probe when doing a single `PROBE` command. This can result in force applied to the toolhead at the end of a probing cycle. Because external forces can vary greatly between probing locations, `load_cell_probe` performs a tare before beginning each probe. If you repeat the `PROBE` command, load_cell_probe will tare at the current force. Multiple cycles of this will result in ever increasing force on the toolhead. `force_safety_limit` stops this cycle from running out of control.
+Another way this run-away can happen is damage to a strain gauge. If the metal
+part is permanently bent it will change the `reference_tare_counts` of the
+device. This puts the starting tare value much closer to the limit making it
+more likely to be violated. You want to be notified if this is happening
+because your hardware has been permanently damaged.
 
 Another way this run-away can happen is damage to a strain gauge. If the metal part is permanently bent it will change the `reference_tare_counts` of the device. This puts the starting tare value much closer to the limit making it more likely to be violated. You want to be notified if this is happening because your hardware has been permanently damaged.
 
